@@ -1,0 +1,23 @@
+# Video
+*.mp4
+*.MP4
+*.mov
+*.MOV
+*.mkv
+*.avi
+*.webm
+*.m4v
+video-bpjt/
+video-roots/
+output/
+
+# Python
+__pycache__/
+*.pyc
+
+# Local caches
+graft/.cache/
+
+# Files over GitHub's 100MB limit
+weights/v5_3_m640.pt
+.DS_Store
