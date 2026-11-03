@@ -21,3 +21,6 @@ graft/.cache/
 # Files over GitHub's 100MB limit
 weights/v5_3_m640.pt
 .DS_Store
+
+# graft's local graph cache — regenerable, not committed (run `graft build`).
+/graft/

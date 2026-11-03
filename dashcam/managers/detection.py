@@ -32,6 +32,7 @@ except ImportError:
 
 from dashcam.models.detection_stats import DetectionStats
 from dashcam.models.detections import Detections
+from dashcam.core.lane import lane_of_point
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -517,6 +518,15 @@ class DetectionManager:
                 cv2.putText(annotated, label, (x1 + 3, ly - 2), _FONT, _FONT_SC,
                             (255, 255, 255), _FONT_TH, cv2.LINE_AA)
 
+                # Jalur ke-n / total — baris kedua di bawah nama pothole/crack
+                lane_no = lane_of_point(lane_result, (x1 + x2) * 0.5, y2)
+                lane_txt = f"Lane {lane_no}/{lane_result['total_lanes']}" if lane_no else ""
+                if lane_txt:
+                    (lw, lh), _ = cv2.getTextSize(lane_txt, _FONT, _FONT_SC, _FONT_TH)
+                    cv2.rectangle(annotated, (x1, ly + 2), (x1 + lw + 6, ly + lh + 10), color, -1)
+                    cv2.putText(annotated, lane_txt, (x1 + 3, ly + lh + 6), _FONT, _FONT_SC,
+                                (255, 255, 255), _FONT_TH, cv2.LINE_AA)
+
                 # ── Count + API queue (skip already-processed trackers) ───
                 tracker_id = tid
                 if tracker_id > 0 and tracker_id not in stats.processed_trackers:
@@ -538,10 +548,14 @@ class DetectionManager:
                         "detection_type": "detected_in_zone",
                         "timestamp": time.strftime("%M:%S"),
                     }
+                    if lane_no:
+                        info["lane"] = lane_no
+                        info["total_lanes"] = lane_result['total_lanes']
                     stats.increment(cname, tracker_id, info)
                     emoji = self.emoji_map.get(cname, "🔍")
                     print(f"{emoji} {cname.upper()} #{count} (ID:#{tracker_id}) "
-                          f"at {info['timestamp']} (Y:{info['position']}, Conf:{conf:.2f})")
+                          f"at {info['timestamp']} (Y:{info['position']}, Conf:{conf:.2f})"
+                          + (f" {lane_txt}" if lane_txt else ""))
 
                     # Crop for API — small region, not full frame
                     crop_x1 = max(0, x1); crop_y1 = max(0, y1)

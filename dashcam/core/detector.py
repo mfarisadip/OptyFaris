@@ -17,7 +17,7 @@ import numpy as np
 from typing import Dict, Any
 
 from dashcam.models.detections import Detections
-from dashcam.core.lane import draw_lane, LaneDetector
+from dashcam.core.lane import draw_lane, LaneDetector, lane_of_point
 
 try:
     import requests
@@ -69,8 +69,8 @@ class LowLatencyDetector:
         self.show_cam = config.get('show_cam', False)
         self.lane_detector = None if config.get('no_lane') else LaneDetector(
             work_h=config.get('lane_work_h', 360), skip=config.get('lane_skip', 2),
-            roi_top_y_frac=config.get('lane_roi_top', 0.60),
-            roi_bottom_y_frac=config.get('lane_roi_bottom', 1.0),
+            roi_top_y_frac=config.get('lane_roi_top'),
+            roi_bottom_y_frac=config.get('lane_roi_bottom'),
             total_lanes=config.get('lanes'),
             use_yellow=config.get('lane_yellow', True),
         )
@@ -220,9 +220,13 @@ class LowLatencyDetector:
         if len(detections) > 0:
             detections = self.detection_manager.spatial_tracker.update_with_detections(detections)
 
+        # Lane detection — jalan di thread YOLO ini (cache internal tiap lane_skip frame);
+        # dihitung sebelum stats supaya tiap pothole/crack tahu jalurnya
+        lane_result = self.lane_detector.detect(frame) if self.lane_detector else None
+
         # Process stats + API
         gps_data = self.gps_manager.get_position()
-        self._process_detections(detections, frame, frame_id, gps_data)
+        self._process_detections(detections, frame, frame_id, gps_data, lane_result)
 
         # Update latest_detections for video overlay
         new_dets = []
@@ -233,17 +237,14 @@ class LowLatencyDetector:
             conf = float(detections.confidence[i])
             bbox = detections.xyxy[i]
             color = (0, 0, 255) if dtype == 'pothole' else (0, 255, 0) if dtype == 'crack' else (255, 165, 0)
-            new_dets.append((bbox, cname, conf, color))
+            lane_no = lane_of_point(lane_result, (bbox[0] + bbox[2]) * 0.5, bbox[3])
+            lane_txt = f"LANE {lane_no}/{lane_result['total_lanes']}" if lane_no else ""
+            new_dets.append((bbox, cname, conf, color, lane_txt))
 
         with self.latest_detections_lock:
             self.latest_detections = new_dets
             self.zone_top_y    = int(h * self.config['top_line'])
             self.zone_bottom_y = int(h * self.config['bottom_line'])
-
-        # Lane detection — jalan di thread YOLO ini (cache internal tiap lane_skip frame)
-        lane_result = self.lane_detector.detect(frame) if self.lane_detector else None
-
-        with self.latest_detections_lock:
             self.latest_lane = lane_result
 
         with self.latest_frame_lock:
@@ -251,6 +252,22 @@ class LowLatencyDetector:
 
         with self.frame_count_lock:
             self.yolo_processed_count += 1
+
+    # ── Box + label (nama di atas, jalur di bawahnya) ──────────────────────
+    @staticmethod
+    def _draw_det_box(annotated, bbox, class_name, conf, color, lane_txt):
+        x1, y1, x2, y2 = [int(v) for v in bbox]
+        cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
+        label = f"{class_name.upper()} {conf:.2f}"
+        lw, lh = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+        cv2.rectangle(annotated, (x1, y1 - lh - 6), (x1 + lw, y1), color, -1)
+        cv2.putText(annotated, label, (x1, y1 - 4),
+                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        if lane_txt:
+            lw, lh = cv2.getTextSize(lane_txt, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
+            cv2.rectangle(annotated, (x1, y1), (x1 + lw, y1 + lh + 6), color, -1)
+            cv2.putText(annotated, lane_txt, (x1, y1 + lh + 2),
+                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
 
     # ── Draw latest detections on raw frame ────────────────────────────────
     def _draw_latest_detections(self, frame: np.ndarray, draw_lines: bool = True) -> np.ndarray:
@@ -270,16 +287,11 @@ class LowLatencyDetector:
             if bottom_y is not None:
                 cv2.line(annotated, (0, bottom_y), (w, bottom_y), (0, 255, 255), 2)
 
-        draw_lane(annotated, lane)
+        if not self.config.get('hide_lane_lines', False):
+            draw_lane(annotated, lane)
 
-        for bbox, class_name, conf, color in dets:
-            x1, y1, x2, y2 = [int(v) for v in bbox]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            label = f"{class_name.upper()} {conf:.2f}"
-            lw, lh = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-            cv2.rectangle(annotated, (x1, y1 - lh - 6), (x1 + lw, y1), color, -1)
-            cv2.putText(annotated, label, (x1, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        for det in dets:
+            self._draw_det_box(annotated, *det)
 
         return annotated
 
@@ -297,17 +309,12 @@ class LowLatencyDetector:
             bottom_y = self.zone_bottom_y if draw_zone and self.zone_bottom_y is not None else None
 
         # Lane overlay (in-place; satu copy overlay di dalam draw_lane)
-        draw_lane(annotated, lane)
+        if not self.config.get('hide_lane_lines', False):
+            draw_lane(annotated, lane)
 
         # Draw detection boxes (shared by video and display)
-        for bbox, class_name, conf, color in dets:
-            x1, y1, x2, y2 = [int(v) for v in bbox]
-            cv2.rectangle(annotated, (x1, y1), (x2, y2), color, 2)
-            label = f"{class_name.upper()} {conf:.2f}"
-            lw, lh = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 1)[0]
-            cv2.rectangle(annotated, (x1, y1 - lh - 6), (x1 + lw, y1), color, -1)
-            cv2.putText(annotated, label, (x1, y1 - 4),
-                        cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 1)
+        for det in dets:
+            self._draw_det_box(annotated, *det)
 
         # Video frame = annotated without zone lines
         video_frame = annotated
@@ -344,7 +351,8 @@ class LowLatencyDetector:
         return detections[mask] if np.any(mask) else Detections.empty()
 
     # ── Process detections (stats + API) ───────────────────────────────────
-    def _process_detections(self, detections: Detections, frame, frame_id, gps_data):
+    def _process_detections(self, detections: Detections, frame, frame_id, gps_data,
+                            lane_result: dict = None):
         if len(detections) == 0:
             return
 
@@ -384,10 +392,15 @@ class LowLatencyDetector:
                 'confidence': confidence, 'detection_type': 'detected_in_zone',
                 'timestamp': timestamp,
             }
+            lane_no = lane_of_point(lane_result, (bbox[0] + bbox[2]) * 0.5, bbox[3])
+            if lane_no:
+                info['lane'] = lane_no
+                info['total_lanes'] = lane_result['total_lanes']
             self.stats.increment(class_name, tracker_id, info)
 
             emoji = self.detection_manager.emoji_map.get(class_name, '🔍')
-            print(f"{emoji} {class_name.upper()} #{count} ID:{tracker_id} Y:{center_y}")
+            lane_txt = f" Lane:{lane_no}/{lane_result['total_lanes']}" if lane_no else ""
+            print(f"{emoji} {class_name.upper()} #{count} ID:{tracker_id} Y:{center_y}{lane_txt}")
 
             # Analyze API — padded crop from raw frame
             self.detection_manager._queue_analyze(frame, bbox, frame_id)

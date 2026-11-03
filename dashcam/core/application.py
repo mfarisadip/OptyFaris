@@ -94,6 +94,7 @@ class DashcamApp:
             'lane_roi_bottom': args.lane_roi_bottom,
             'lanes': args.lanes,
             'lane_yellow': not args.lane_white_only,
+            'hide_lane_lines': args.hide_lane_lines,
         }
 
         self.gps_manager = GPSManager()
@@ -600,7 +601,7 @@ class DashcamApp:
                 )
 
                 # --- Gambar garis lane (teks info sudah di overlay) ---
-                if lane_result:
+                if lane_result and not self.config.get('hide_lane_lines', False):
                     draw_lane(annotated, lane_result)
 
                 # --- Tulis frame (enqueue non-blocking di thread utama;

@@ -18,7 +18,7 @@ echo -e "${BLUE}  Memproses semua video di folder data/${NC}"
 echo -e "${BLUE}========================================${NC}\n"
 
 # Loop untuk setiap file video di folder data/
-for video in /mnt/d/workspace/OptyFaris/video-bpjt/*.[mM][pP]4; do
+for video in /mnt/d/workspace/OptyFaris/video-analisa/*.[mM][pP]4; do
     # Cek apakah file ada (untuk handle kasus folder kosong)
     if [ ! -f "$video" ]; then
         echo -e "${RED}Tidak ada file video di folder data/${NC}"
@@ -36,10 +36,9 @@ for video in /mnt/d/workspace/OptyFaris/video-bpjt/*.[mM][pP]4; do
         --video-path "$video" \
         --device cuda \
         --cuda-device 0 \
-        --model /mnt/d/workspace/OptyFaris/weights/Yolo11mV3-1.pt \
+        --model /mnt/d/workspace/OptyFaris/weights/v5_4b.pt \
         --no-zone \
         --save-video \
-        --no-lane \
 	    --conf 0.45
     
     # Cek status eksekusi

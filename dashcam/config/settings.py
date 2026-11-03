@@ -88,7 +88,8 @@ def parse_arguments():
     
     # Lane detection settings
     parser.add_argument('--no-lane', action='store_true', default=False,
-                        help='Nonaktifkan lane + active lane detection (grayscale->blur->canny->ROI trapesium->Hough->fit+EMA)')
+                        help='Nonaktifkan lane + active lane detection (stripe cat marka -> titik hilang '
+                             'otomatis -> marka lewat VP -> pasangan ego lane -> fit + smoothing)')
     parser.add_argument('--lanes', type=int, default=None,
                         help='Override jumlah jalur (mis. 3). Default: deteksi otomatis '
                              'dari marka pembatas (tanda "|") dengan voting temporal')
@@ -96,14 +97,17 @@ def parse_arguments():
                         help='Tinggi resolusi kerja lane detection (kecil = ringan)')
     parser.add_argument('--lane-skip', type=int, default=2,
                         help='Recompute lane tiap N frame (hasil antara pakai cache)')
-    parser.add_argument('--lane-roi-top', type=float, default=0.60,
-                        help='Batas atas ROI trapesium lane (fraksi tinggi frame). '
-                             'Default 0.60 = referensi; naikkan (mis. 0.75) kalau horizon kamera rendah')
-    parser.add_argument('--lane-roi-bottom', type=float, default=1.0,
-                        help='Batas bawah ROI lane (fraksi tinggi frame). Turunkan (mis. 0.85) '
-                             'kalau kap mesin / dashboard terlihat di bawah frame')
+    parser.add_argument('--lane-roi-top', type=float, default=None,
+                        help='Batas atas manual area lane (fraksi tinggi frame). Default: otomatis '
+                             'dari titik hilang (horizon) — isi hanya kalau kalibrasi otomatis gagal')
+    parser.add_argument('--lane-roi-bottom', type=float, default=None,
+                        help='Batas bawah manual area lane (fraksi tinggi frame, mis. 0.85). Default: '
+                             'otomatis — kap mesin / dashboard terdeteksi dari dukungan marka')
     parser.add_argument('--lane-white-only', action='store_true', default=False,
                         help='Hanya pakai marka putih (default: marka putih + kuning)')
+    parser.add_argument('--hide-lane-lines', action='store_true', default=False,
+                        help='Jangan gambar garis lajur + angka jalur di tengah lajur '
+                             '(lane detection, label jalur pothole/crack & info pojok tetap jalan)')
 
     # Performance settings
     parser.add_argument('--target-fps', type=int, default=30,
